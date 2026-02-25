@@ -36,7 +36,7 @@ users_collection = db["users"]
 
 print("✅ Connected to MongoDB Atlas")
 
-# ================= PASSWORD =================
+# ================= PASSWORD HASHING =================
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 def hash_password(password: str):
@@ -61,35 +61,34 @@ class RegisterModel(BaseModel):
     phone: str
     password: str
     confirmPassword: str
-    role: str
 
 class LoginModel(BaseModel):
     email: EmailStr
     password: str
-    role: str
 
 # ================= REGISTER =================
 @app.post("/register")
 async def register(user: RegisterModel):
 
+    # Password match check
     if user.password != user.confirmPassword:
         raise HTTPException(status_code=400, detail="Passwords do not match")
 
-    if user.role not in ["student", "driver"]:
-        raise HTTPException(status_code=400, detail="Invalid role")
-
+    # Check if email exists
     existing_user = await users_collection.find_one({"email": user.email})
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already exists")
 
+    # Hash password
     hashed_password = hash_password(user.password)
 
+    # Create user (default role = student)
     new_user = {
         "name": user.name,
         "email": user.email,
         "phone": user.phone,
         "password": hashed_password,
-        "role": user.role,
+        "role": "student",
         "createdAt": datetime.utcnow(),
         "updatedAt": datetime.utcnow(),
         "lastLogin": None
@@ -99,30 +98,30 @@ async def register(user: RegisterModel):
 
     return {
         "message": "Account created successfully!",
-        "redirect": "/login"   # frontend uses this
+        "redirect": "/login"
     }
 
 # ================= LOGIN =================
 @app.post("/login")
 async def login(data: LoginModel):
 
+    # Check if user exists
     user = await users_collection.find_one({"email": data.email})
 
     if not user:
         raise HTTPException(status_code=400, detail="Invalid email or password")
 
-    if user["role"] != data.role:
-        raise HTTPException(status_code=400, detail="Incorrect role selected")
-
+    # Verify password
     if not verify_password(data.password, user["password"]):
         raise HTTPException(status_code=400, detail="Invalid email or password")
 
-    # Update last login time
+    # Update last login
     await users_collection.update_one(
         {"email": data.email},
         {"$set": {"lastLogin": datetime.utcnow()}}
     )
 
+    # Generate token
     token = create_token(str(user["_id"]), user["role"])
 
     return {
